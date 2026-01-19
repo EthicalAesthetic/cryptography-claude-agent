@@ -98,3 +98,11 @@ $RECYCLE.BIN/
 *.bak
 *.backup
 *~
+
+
+
+
+# demo files
+run_demo.py
+simple_tese.py
+demo.py

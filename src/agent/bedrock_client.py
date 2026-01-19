@@ -2,6 +2,7 @@
 AWS Bedrock client for Claude AI integration
 """
 import os
+import json
 import logging
 from typing import List, Dict, Any, Optional
 import boto3
@@ -17,14 +18,14 @@ class BedrockClient:
     
     def __init__(
         self,
-        model_id: str = None,
-        region: str = None,
-        aws_access_key_id: str = None,
-        aws_secret_access_key: str = None
+        model_id: Optional[str] = None,
+        region: Optional[str] = None,
+        aws_access_key_id: Optional[str] = None,
+        aws_secret_access_key: Optional[str] = None
     ):
         self.model_id = model_id or os.getenv(
             "BEDROCK_MODEL_ID",
-            "anthropic.claude-3-5-sonnet-20241022-v2:0"
+            "us.anthropic.claude-3-sonnet-20240229-v1:0"
         )
         self.region = region or os.getenv("AWS_REGION", "us-east-1")
         
@@ -59,53 +60,64 @@ class BedrockClient:
         max_tokens: int = 4096
     ) -> Dict[str, Any]:
         """
-        Call Claude via Bedrock Converse API with tool support.
-        
-        Args:
-            messages: Conversation history
-            tools: Available tools for Claude to use
-            system_prompt: System instructions
-            temperature: Sampling temperature (0-1)
-            max_tokens: Maximum tokens to generate
-        
-        Returns:
-            Claude's response with potential tool calls
+        Call Claude via Bedrock with tool support.
+        Uses invoke_model API for compatibility.
         """
         try:
-            # Build request
-            request = {
-                "modelId": self.model_id,
-                "messages": messages,
-                "inferenceConfig": {
-                    "temperature": temperature,
-                    "maxTokens": max_tokens
-                }
+            # Build Anthropic Messages API format request
+            request_body = {
+                "anthropic_version": "bedrock-2023-05-31",
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+                "messages": messages
             }
             
             # Add system prompt if provided
             if system_prompt:
-                request["system"] = [{"text": system_prompt}]
+                request_body["system"] = system_prompt
             
             # Add tools if provided
             if tools:
-                request["toolConfig"] = {
-                    "tools": tools
-                }
+                # Convert Bedrock tool format to Anthropic format
+                anthropic_tools = []
+                for tool in tools:
+                    tool_spec = tool.get("toolSpec", {})
+                    anthropic_tools.append({
+                        "name": tool_spec.get("name"),
+                        "description": tool_spec.get("description"),
+                        "input_schema": tool_spec.get("inputSchema", {}).get("json", {})
+                    })
+                request_body["tools"] = anthropic_tools
             
             logger.debug(f"Bedrock request: {len(messages)} messages, {len(tools) if tools else 0} tools")
             
             # Call Bedrock
-            response = self.client.converse(**request)
+            response = self.client.invoke_model(
+                modelId=self.model_id,
+                body=json.dumps(request_body)
+            )
             
-            # Extract output
-            output = response.get("output", {})
+            # Parse response
+            response_body = json.loads(response['body'].read())
             
-            logger.debug(f"Bedrock response: stop_reason={response.get('stopReason')}")
+            # Convert Anthropic response to Bedrock converse format
+            content = response_body.get("content", [])
+            stop_reason = response_body.get("stop_reason")
+            
+            # Map stop reasons
+            stop_reason_map = {
+                "end_turn": "end_turn",
+                "tool_use": "tool_use",
+                "max_tokens": "max_tokens",
+                "stop_sequence": "stop_sequence"
+            }
+            
+            logger.debug(f"Bedrock response: stop_reason={stop_reason}")
             
             return {
-                "content": output.get("message", {}).get("content", []),
-                "stopReason": response.get("stopReason"),
-                "usage": response.get("usage", {})
+                "content": content,
+                "stopReason": stop_reason_map.get(stop_reason, stop_reason),
+                "usage": response_body.get("usage", {})
             }
             
         except Exception as e:
