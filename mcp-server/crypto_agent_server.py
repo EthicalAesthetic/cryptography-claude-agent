@@ -20,13 +20,33 @@ class CryptoAgentMCPServer:
     
     def __init__(self):
         self.agent = None
+        self.initialized = False
     
-    async def initialize(self):
+    async def initialize_agent(self):
         """Initialize the crypto agent"""
-        self.agent = await create_agent()
+        if not self.initialized:
+            self.agent = await create_agent()
+            self.initialized = True
     
     async def handle_request(self, method: str, params: dict):
         """Handle MCP requests"""
+        
+        # Handle MCP initialize method (required!)
+        if method == "initialize":
+            return {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {
+                    "tools": {}
+                },
+                "serverInfo": {
+                    "name": "crypto-agent",
+                    "version": "1.0.0"
+                }
+            }
+        
+        # Initialize agent if needed (lazy initialization after handshake)
+        if not self.initialized and method in ["tools/list", "tools/call"]:
+            await self.initialize_agent()
         
         if method == "tools/list":
             # List available tools
@@ -140,8 +160,6 @@ class CryptoAgentMCPServer:
     
     async def run(self):
         """Run MCP server (stdio mode)"""
-        await self.initialize()
-        
         # Read from stdin, write to stdout
         while True:
             try:
@@ -152,24 +170,33 @@ class CryptoAgentMCPServer:
                 request = json.loads(line)
                 method = request.get("method")
                 params = request.get("params", {})
+                request_id = request.get("id")
+                
+                # Ignore notifications (they don't have an id and don't expect a response)
+                if request_id is None:
+                    continue
                 
                 response = await self.handle_request(method, params)
                 
-                # Write response to stdout
+                # Write response to stdout (only for requests, not notifications)
                 print(json.dumps({
                     "jsonrpc": "2.0",
-                    "id": request.get("id"),
+                    "id": request_id,
                     "result": response
                 }))
                 sys.stdout.flush()
                 
             except Exception as e:
+                # Debug: write errors to stderr
+                print(f"Error: {str(e)}", file=sys.stderr)
+                sys.stderr.flush()
+                
                 print(json.dumps({
                     "jsonrpc": "2.0",
-                    "id": request.get("id"),
-                    "error": {"message": str(e)}
-                }), file=sys.stderr)
-                sys.stderr.flush()
+                    "id": request.get("id", None),
+                    "error": {"code": -1, "message": str(e)}
+                }))
+                sys.stdout.flush()
 
 
 if __name__ == "__main__":
