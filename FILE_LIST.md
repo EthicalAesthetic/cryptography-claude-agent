@@ -6,19 +6,19 @@
 
 ```
 claude-crypto-agent-poc/
-├── README.md                    ✅ Main documentation
-├── SETUP_GUIDE.md              ✅ Setup instructions
-├── FILE_LIST.md                ✅ This file
-├── demo.py                      ✅ Demo script
-├── requirements.txt             ✅ Python dependencies
-└── .env.example                 ✅ Environment template
+├── README.md                          ✅ Main documentation
+├── SETUP_GUIDE.md                     ✅ Setup instructions
+├── FILE_LIST.md                       ✅ This file
+├── start_demo.py                      ✅ Demo script
+├── requirements.txt                   ✅ Python dependencies
+└── .env.example                       ✅ Environment template
 ```
 
 ### Source Code Files
 
 ```
 src/
-├── __init__.py                  ⬜ Create empty file
+├── __init__.py                  ⬜ Create empty file 
 │
 ├── agent/
 │   ├── __init__.py              ⬜ Create empty file
@@ -133,7 +133,7 @@ tree -L 3
 # .
 # ├── README.md
 # ├── SETUP_GUIDE.md
-# ├── demo.py
+# ├── start_demo.py
 # ├── requirements.txt
 # ├── .env.example
 # └── src
@@ -170,7 +170,7 @@ Get-ChildItem -Recurse -Depth 2 | Select-Object FullName
 4. **Copy configuration files** (.env.example, requirements.txt)
 5. **Install dependencies** (`pip install -r requirements.txt`)
 6. **Configure AWS** (edit .env)
-7. **Run demo** (`python demo.py`)
+7. **Run demo** (`python start_demo.py`)
 
 ## File Sizes (Approximate)
 
@@ -184,7 +184,7 @@ Get-ChildItem -Recurse -Depth 2 | Select-Object FullName
 | policy_tools.py | 120 | 4 KB |
 | engine.py | 20 | 1 KB |
 | logger.py | 70 | 2 KB |
-| demo.py | 150 | 5 KB |
+| start_demo.py | 150 | 5 KB |
 | **Total** | **~1140** | **~38 KB** |
 
 ## Dependencies Overview
@@ -236,7 +236,7 @@ python -c "import boto3; import cryptography; print('✅ All imports OK')"
 python -c "import os; print('✅ AWS key set' if os.getenv('AWS_ACCESS_KEY_ID') else '❌ Set AWS credentials')"
 
 # 5. Run demo
-python demo.py
+python start_demo.py
 ```
 
 ## Troubleshooting
@@ -266,7 +266,7 @@ cat .env  # Or: echo $AWS_ACCESS_KEY_ID
 
 After setup:
 
-1. ✅ Run `python demo.py` - See it in action
+1. ✅ Run `python start_demo.py` - See it in action
 2. ✅ Check `audit_logs/` - View operation logs
 3. ✅ Try interactive mode - Chat with agent
 4. ✅ Read the code - Understand how it works
@@ -281,7 +281,7 @@ cp .env.example .env
 # Edit .env with AWS credentials
 
 # Run
-python demo.py
+python start_demo.py
 
 # Check logs
 cat audit_logs/audit_*.jsonl | jq
@@ -289,4 +289,13 @@ cat audit_logs/audit_*.jsonl | jq
 
 ---
 
-**All files are ready to use! Copy them from the artifacts above.** 🚀
+# New Files
+
+- To test if the AWS bedrock connection is implemented 
+```bash
+python test_bedrock.py
+```
+- To list all the existing models in the AWS Bedrock account
+```bash
+python list_models.py
+```

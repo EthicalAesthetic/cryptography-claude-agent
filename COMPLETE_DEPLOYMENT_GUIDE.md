@@ -161,7 +161,7 @@ __version__ = "0.1.0-poc"
 6. `src/tools/policy_tools.py` - From artifact "src/tools/policy_tools.py"
 7. `src/policies/engine.py` - From artifact "src/policies/engine.py"
 8. `src/audit/logger.py` - From artifact "src/audit/logger.py"
-9. `demo.py` - From artifact "demo.py"
+9. `start_demo.py` - From artifact "start_demo.py"
 
 #### File: `requirements.txt`
 ```
@@ -291,14 +291,14 @@ print('✅ AWS connection successful!')
 # Make sure virtual environment is active
 source venv/bin/activate  # or venv\Scripts\activate on Windows
 
-# Run demo
-python demo.py
+# Run start_demo
+python start_demo.py
 ```
 
 ### Expected Output:
 ```
 ======================================================================
-   Claude Cryptographic Agent - Proof of Concept Demo
+   Claude Cryptographic Agent - Proof of Concept start_demo
 ======================================================================
 
 ⚠️  WARNING: AWS_ACCESS_KEY_ID not set in environment
@@ -311,7 +311,7 @@ Initializing agent...
 ✓ Agent initialized
 
 Select mode:
-1. Run demo scenarios
+1. Run start_demo scenarios
 2. Interactive chat
 
 Choice (1/2): 2
@@ -867,7 +867,7 @@ tail -f ~/Library/Logs/Claude/mcp-server-crypto-agent.log
 - [ ] Virtual environment created and activated
 - [ ] Dependencies installed (`pip list` shows boto3, cryptography)
 - [ ] `.env` file configured with AWS credentials
-- [ ] `python demo.py` runs successfully
+- [ ] `python start_demo.py` runs successfully
 - [ ] Agent responds to queries
 - [ ] Audit logs created in `audit_logs/`
 - [ ] Certificate generation works
@@ -894,7 +894,7 @@ tail -f ~/Library/Logs/Claude/mcp-server-crypto-agent.log
 source venv/bin/activate
 
 # Run POC
-python demo.py
+python start_demo.py
 
 # Test MCP server
 echo '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' | python3 mcp-server/crypto_agent_server.py
@@ -929,7 +929,7 @@ killall Claude && open -a Claude
 ✅ **Cryptographic Operations** - Real key gen, CSR, certificates  
 ✅ **Policy Enforcement** - Validates all operations  
 ✅ **Audit System** - Complete compliance trail  
-✅ **CLI Interface** - Interactive demo  
+✅ **CLI Interface** - Interactive start_demo  
 ✅ **Claude Desktop Plugin** - Use in Claude app  
 ✅ **Production Foundation** - Ready to extend  
 

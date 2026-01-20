@@ -34,7 +34,7 @@ cp .env.example .env
 touch src/__init__.py src/{agent,tools,policies,audit}/__init__.py
 
 # 4. Run demo
-python demo.py
+python start_demo.py
 ```
 
 ## 📁 Project Structure
@@ -54,7 +54,7 @@ claude-crypto-agent-poc/
 │   │   └── engine.py            # Policy engine
 │   └── audit/
 │       └── logger.py            # Audit logging
-├── demo.py                       # Demo script
+├── start_start_demo.py                       # Demo script
 ├── requirements.txt              # Dependencies
 └── README.md                     # This file
 ```
@@ -192,7 +192,7 @@ The agent has access to these tools:
 
 ## 📊 Demo Scenarios
 
-Run `python demo.py` to see:
+Run `python start_start_demo.py` to see:
 
 1. **Simple TLS Certificate** - Basic certificate issuance
 2. **Multiple Domains** - Certificate with SANs
@@ -363,7 +363,7 @@ After running the demo, you should see:
 **Ready to see AI-powered PKI automation in action?**
 
 ```bash
-python demo.py
+python start_start_demo.py
 ```
 
 ---
