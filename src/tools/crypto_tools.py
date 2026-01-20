@@ -1,5 +1,6 @@
 """
 Cryptographic Tools - Key generation, CSR creation, etc.
+Fixed with shared key storage
 """
 import logging
 from typing import Dict, Any
@@ -8,6 +9,8 @@ from cryptography.hazmat.primitives.asymmetric import rsa, ec
 from cryptography.hazmat.primitives import serialization, hashes
 from cryptography import x509
 from cryptography.x509.oid import NameOID, ExtensionOID
+
+from src.tools.key_storage import key_storage  # Import shared storage
 
 logger = logging.getLogger(__name__)
 
@@ -62,12 +65,7 @@ class GenerateKeyPairTool:
         key_size: int = None,
         curve: str = None
     ) -> Dict[str, Any]:
-        """
-        Generate a key pair.
-        
-        NOTE: In production, this would use Vault.
-        For POC, we generate in memory and only return public key.
-        """
+        """Generate a key pair with shared storage"""
         try:
             # Generate key based on algorithm
             if algorithm == "RSA":
@@ -84,7 +82,6 @@ class GenerateKeyPairTool:
                 if not curve:
                     curve = "P-256"
                 
-                # Map curve names to cryptography curves
                 curve_map = {
                     "P-256": ec.SECP256R1(),
                     "P-384": ec.SECP384R1(),
@@ -103,12 +100,11 @@ class GenerateKeyPairTool:
                 format=serialization.PublicFormat.SubjectPublicKeyInfo
             ).decode('utf-8')
             
-            # Generate a mock key_id (in production, this would be Vault's key ID)
+            # Generate key_id
             key_id = f"key_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
             
-            # Store private key in memory (POC only - use Vault in production)
-            # This is just for demonstration
-            self._store_private_key(key_id, private_key)
+            # Store in shared storage
+            key_storage.store_key(key_id, private_key)
             
             logger.info(f"Generated {algorithm_display} key pair: {key_id}")
             
@@ -119,30 +115,19 @@ class GenerateKeyPairTool:
                 "usage": usage,
                 "created_at": datetime.utcnow().isoformat(),
                 "status": "success",
-                "message": f"{algorithm_display} key pair generated successfully. Private key stored securely."
+                "message": f"✓ {algorithm_display} key pair generated successfully. Private key stored securely with ID: {key_id}"
             }
             
         except Exception as e:
             logger.error(f"Key generation failed: {str(e)}")
             raise
-    
-    def _store_private_key(self, key_id: str, private_key):
-        """
-        Store private key (POC implementation).
-        In production, this would call Vault API.
-        """
-        # For POC, store in a simple in-memory dict
-        if not hasattr(self, '_key_storage'):
-            self._key_storage = {}
-        self._key_storage[key_id] = private_key
-        logger.debug(f"Stored private key: {key_id}")
 
 
 class CreateCSRTool:
     """Tool for creating Certificate Signing Requests"""
     
     name = "create_csr"
-    description = "Create a Certificate Signing Request (CSR) for certificate issuance."
+    description = "Create a Certificate Signing Request (CSR) for certificate issuance. Requires a key_id from generate_key_pair."
     
     def to_bedrock_format(self) -> Dict:
         """Convert to Bedrock tool format"""
@@ -156,7 +141,7 @@ class CreateCSRTool:
                         "properties": {
                             "key_id": {
                                 "type": "string",
-                                "description": "ID of the private key to use for signing the CSR"
+                                "description": "ID of the private key to use (from generate_key_pair)"
                             },
                             "common_name": {
                                 "type": "string",
@@ -164,11 +149,13 @@ class CreateCSRTool:
                             },
                             "organization": {
                                 "type": "string",
-                                "description": "Organization name"
+                                "description": "Organization name",
+                                "default": "Example Org"
                             },
                             "country": {
                                 "type": "string",
-                                "description": "Two-letter country code"
+                                "description": "Two-letter country code",
+                                "default": "US"
                             },
                             "sans": {
                                 "type": "array",
@@ -190,12 +177,18 @@ class CreateCSRTool:
         country: str = "US",
         sans: list = None
     ) -> Dict[str, Any]:
-        """
-        Create a Certificate Signing Request.
-        """
+        """Create a Certificate Signing Request using shared storage"""
         try:
-            # In POC, retrieve key from memory (in production, use Vault)
-            private_key = self._get_private_key(key_id)
+            # Retrieve key from shared storage
+            private_key = key_storage.get_key(key_id)
+            
+            if not private_key:
+                available_keys = key_storage.list_keys()
+                raise ValueError(
+                    f"Key not found: {key_id}. "
+                    f"Available keys: {available_keys if available_keys else 'None'}. "
+                    f"Please generate a key first using generate_key_pair."
+                )
             
             # Build subject name
             subject = x509.Name([
@@ -222,7 +215,7 @@ class CreateCSRTool:
             # Convert to PEM
             csr_pem = csr.public_bytes(serialization.Encoding.PEM).decode('utf-8')
             
-            logger.info(f"Created CSR for: {common_name}")
+            logger.info(f"Created CSR for: {common_name} using key: {key_id}")
             
             return {
                 "csr_pem": csr_pem,
@@ -232,24 +225,11 @@ class CreateCSRTool:
                     "country": country
                 },
                 "sans": sans or [],
+                "key_id": key_id,
                 "status": "success",
-                "message": f"CSR created successfully for {common_name}"
+                "message": f"✓ CSR created successfully for {common_name}"
             }
             
         except Exception as e:
             logger.error(f"CSR creation failed: {str(e)}")
             raise
-    
-    def _get_private_key(self, key_id: str):
-        """
-        Retrieve private key (POC implementation).
-        In production, this would call Vault API.
-        """
-        # Access the key storage from GenerateKeyPairTool
-        # This is a hack for POC - in production, use Vault
-        from src.tools.crypto_tools import GenerateKeyPairTool
-        tool = GenerateKeyPairTool()
-        if hasattr(tool, '_key_storage') and key_id in tool._key_storage:
-            return tool._key_storage[key_id]
-        
-        raise ValueError(f"Key not found: {key_id}. Please generate a key first.")
