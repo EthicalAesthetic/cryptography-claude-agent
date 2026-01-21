@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 MCP Server for Claude Crypto Agent
-Allows Claude Desktop to invoke crypto operations
+Works with Claude Desktop - Fixed notification handling
 """
 import asyncio
 import json
@@ -10,8 +10,26 @@ import os
 from pathlib import Path
 
 # Add parent directory to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root))
 
+# Set up logging to file instead of stdout (MCP uses stdout for protocol)
+import logging
+logging.basicConfig(
+    filename=str(project_root / 'mcp_server.log'),
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+# Load environment variables
+from dotenv import load_dotenv
+env_path = project_root / '.env'
+if env_path.exists():
+    load_dotenv(env_path)
+    logger.info("Loaded .env file")
+
+# Now import agent after path is set
 from src.agent.orchestrator import create_agent
 
 
@@ -20,185 +38,244 @@ class CryptoAgentMCPServer:
     
     def __init__(self):
         self.agent = None
-        self.initialized = False
+        logger.info("MCP Server initialized")
     
-    async def initialize_agent(self):
+    async def initialize(self):
         """Initialize the crypto agent"""
-        if not self.initialized:
+        try:
+            logger.info("Creating agent...")
             self.agent = await create_agent()
-            self.initialized = True
+            logger.info("Agent created successfully")
+        except Exception as e:
+            logger.error(f"Failed to create agent: {e}", exc_info=True)
+            raise
     
-    async def handle_request(self, method: str, params: dict):
-        """Handle MCP requests"""
+    async def handle_request(self, request: dict):
+        """Handle MCP JSON-RPC requests"""
+        method = request.get("method")
+        params = request.get("params", {})
+        request_id = request.get("id")
         
-        # Handle MCP initialize method (required!)
-        if method == "initialize":
-            return {
-                "protocolVersion": "2025-06-18",
-                "capabilities": {
-                    "tools": {}
-                },
-                "serverInfo": {
-                    "name": "crypto-agent",
-                    "version": "1.0.0"
-                }
-            }
+        logger.info(f"Handling request: {method}")
         
-        # Initialize agent if needed (lazy initialization after handshake)
-        if not self.initialized and method in ["tools/list", "tools/call"]:
-            await self.initialize_agent()
-        
-        if method == "tools/list":
-            # List available tools
-            return {
-                "tools": [
-                    {
-                        "name": "generate_certificate",
-                        "description": "Generate a TLS/SSL certificate for a domain",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "domain": {
-                                    "type": "string",
-                                    "description": "Domain name for the certificate"
-                                },
-                                "certificate_type": {
-                                    "type": "string",
-                                    "enum": ["tls_server", "tls_client", "code_signing"],
-                                    "description": "Type of certificate"
-                                },
-                                "validity_days": {
-                                    "type": "integer",
-                                    "description": "Validity period in days (max 397)"
-                                }
-                            },
-                            "required": ["domain"]
-                        }
-                    },
-                    {
-                        "name": "validate_policy",
-                        "description": "Check if a certificate request complies with policies",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "operation": {
-                                    "type": "string",
-                                    "description": "Operation to validate"
-                                },
-                                "parameters": {
-                                    "type": "object",
-                                    "description": "Parameters to check"
-                                }
-                            },
-                            "required": ["operation", "parameters"]
-                        }
-                    },
-                    {
-                        "name": "get_certificate_info",
-                        "description": "Get information about a certificate",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "certificate_pem": {
-                                    "type": "string",
-                                    "description": "Certificate in PEM format"
-                                }
-                            },
-                            "required": ["certificate_pem"]
+        try:
+            if method == "initialize":
+                return {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "result": {
+                        "protocolVersion": "2025-06-18",
+                        "capabilities": {
+                            "tools": {}
+                        },
+                        "serverInfo": {
+                            "name": "crypto-agent",
+                            "version": "1.0.0"
                         }
                     }
-                ]
-            }
-        
-        elif method == "tools/call":
-            # Execute tool
-            tool_name = params.get("name")
-            tool_params = params.get("arguments", {})
+                }
             
-            # Map MCP tool calls to agent operations
-            if tool_name == "generate_certificate":
-                query = f"Generate a {tool_params.get('certificate_type', 'tls_server')} certificate for {tool_params['domain']}"
-                if 'validity_days' in tool_params:
-                    query += f" valid for {tool_params['validity_days']} days"
+            elif method == "notifications/initialized":
+                # This is a notification - no response needed
+                logger.info("Client sent initialized notification")
+                return None
+            
+            elif method == "tools/list":
+                return {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "result": {
+                        "tools": [
+                            {
+                                "name": "generate_certificate",
+                                "description": "Generate a TLS/SSL certificate for a domain. Handles the complete workflow: key generation, CSR creation, and certificate issuance.",
+                                "inputSchema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "domain": {
+                                            "type": "string",
+                                            "description": "Domain name for the certificate (e.g., api.example.com)"
+                                        },
+                                        "validity_days": {
+                                            "type": "integer",
+                                            "description": "Certificate validity in days (max 397, default 365)",
+                                            "default": 365
+                                        }
+                                    },
+                                    "required": ["domain"]
+                                }
+                            },
+                            {
+                                "name": "check_policy",
+                                "description": "Check if a certificate request complies with organizational policies",
+                                "inputSchema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "validity_days": {
+                                            "type": "integer",
+                                            "description": "Requested validity period in days"
+                                        },
+                                        "key_size": {
+                                            "type": "integer",
+                                            "description": "Requested RSA key size in bits"
+                                        }
+                                    }
+                                }
+                            }
+                        ]
+                    }
+                }
+            
+            elif method == "tools/call":
+                tool_name = params.get("name")
+                tool_args = params.get("arguments", {})
                 
-                result = await self.agent.process_request(query)
-                return {
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": result.get('response', str(result))
+                logger.info(f"Calling tool: {tool_name} with args: {tool_args}")
+                
+                if tool_name == "generate_certificate":
+                    domain = tool_args.get("domain")
+                    validity_days = tool_args.get("validity_days", 365)
+                    
+                    # Create natural language query for agent
+                    query = f"Generate a TLS server certificate for {domain} valid for {validity_days} days"
+                    
+                    logger.info(f"Sending to agent: {query}")
+                    result = await self.agent.process_request(query)
+                    
+                    if result['status'] == 'success':
+                        return {
+                            "jsonrpc": "2.0",
+                            "id": request_id,
+                            "result": {
+                                "content": [
+                                    {
+                                        "type": "text",
+                                        "text": f"✅ Certificate generated successfully!\n\n{result['response']}\n\nCorrelation ID: {result['correlation_id']}"
+                                    }
+                                ]
+                            }
                         }
-                    ]
-                }
+                    else:
+                        return {
+                            "jsonrpc": "2.0",
+                            "id": request_id,
+                            "result": {
+                                "content": [
+                                    {
+                                        "type": "text",
+                                        "text": f"❌ Error generating certificate: {result.get('error', 'Unknown error')}"
+                                    }
+                                ],
+                                "isError": True
+                            }
+                        }
+                
+                elif tool_name == "check_policy":
+                    validity_days = tool_args.get("validity_days")
+                    key_size = tool_args.get("key_size")
+                    
+                    query = f"Check policy compliance for: validity={validity_days} days, key_size={key_size} bits"
+                    
+                    result = await self.agent.process_request(query)
+                    
+                    return {
+                        "jsonrpc": "2.0",
+                        "id": request_id,
+                        "result": {
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": result.get('response', 'Policy check completed')
+                                }
+                            ]
+                        }
+                    }
+                
+                else:
+                    return {
+                        "jsonrpc": "2.0",
+                        "id": request_id,
+                        "error": {
+                            "code": -32601,
+                            "message": f"Unknown tool: {tool_name}"
+                        }
+                    }
             
-            elif tool_name == "validate_policy":
-                # Use the agent to validate
-                query = f"Can I perform {tool_params['operation']} with parameters: {json.dumps(tool_params['parameters'])}"
-                result = await self.agent.process_request(query)
+            else:
                 return {
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": result.get('response', str(result))
-                        }
-                    ]
-                }
-            
-            elif tool_name == "get_certificate_info":
-                query = f"Parse this certificate and give me information: {tool_params['certificate_pem']}"
-                result = await self.agent.process_request(query)
-                return {
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": result.get('response', str(result))
-                        }
-                    ]
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "error": {
+                        "code": -32601,
+                        "message": f"Method not found: {method}"
+                    }
                 }
         
-        return {"error": "Unknown method"}
+        except Exception as e:
+            logger.error(f"Error handling request: {e}", exc_info=True)
+            return {
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "error": {
+                    "code": -32603,
+                    "message": f"Internal error: {str(e)}"
+                }
+            }
     
     async def run(self):
         """Run MCP server (stdio mode)"""
-        # Read from stdin, write to stdout
-        while True:
-            try:
-                line = sys.stdin.readline()
-                if not line:
-                    break
-                
-                request = json.loads(line)
-                method = request.get("method")
-                params = request.get("params", {})
-                request_id = request.get("id")
-                
-                # Ignore notifications (they don't have an id and don't expect a response)
-                if request_id is None:
+        try:
+            await self.initialize()
+            logger.info("MCP Server ready, listening on stdin...")
+            
+            # Read from stdin line by line
+            while True:
+                try:
+                    line = sys.stdin.readline()
+                    if not line:
+                        logger.info("EOF received, shutting down")
+                        break
+                    
+                    line = line.strip()
+                    if not line:
+                        continue
+                    
+                    logger.info(f"Received: {line[:100]}...")
+                    
+                    request = json.loads(line)
+                    response = await self.handle_request(request)
+                    
+                    # Only write response if not None (notifications don't need responses)
+                    if response is not None:
+                        response_str = json.dumps(response)
+                        print(response_str, flush=True)
+                        logger.info(f"Sent response for request {request.get('id')}")
+                    else:
+                        logger.info(f"No response needed for {request.get('method')}")
+                    
+                except json.JSONDecodeError as e:
+                    logger.error(f"JSON decode error: {e}")
                     continue
-                
-                response = await self.handle_request(method, params)
-                
-                # Write response to stdout (only for requests, not notifications)
-                print(json.dumps({
-                    "jsonrpc": "2.0",
-                    "id": request_id,
-                    "result": response
-                }))
-                sys.stdout.flush()
-                
-            except Exception as e:
-                # Debug: write errors to stderr
-                print(f"Error: {str(e)}", file=sys.stderr)
-                sys.stderr.flush()
-                
-                print(json.dumps({
-                    "jsonrpc": "2.0",
-                    "id": request.get("id", None),
-                    "error": {"code": -1, "message": str(e)}
-                }))
-                sys.stdout.flush()
+                except Exception as e:
+                    logger.error(f"Error in main loop: {e}", exc_info=True)
+                    continue
+        
+        except Exception as e:
+            logger.error(f"Fatal error in server: {e}", exc_info=True)
+            raise
+
+
+async def main():
+    logger.info("Starting MCP Server...")
+    server = CryptoAgentMCPServer()
+    await server.run()
 
 
 if __name__ == "__main__":
-    server = CryptoAgentMCPServer()
-    asyncio.run(server.run())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logger.info("Server stopped by user")
+    except Exception as e:
+        logger.error(f"Server crashed: {e}", exc_info=True)
+        sys.exit(1)

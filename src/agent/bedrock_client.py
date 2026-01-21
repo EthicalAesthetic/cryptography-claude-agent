@@ -28,7 +28,7 @@ class BedrockClient:
     ):
         self.model_id = model_id or os.getenv(
             "BEDROCK_MODEL_ID",
-            "us.anthropic.claude-3-5-sonnet-20241022-v2:0"  # Updated to latest
+            "anthropic.claude-3-sonnet-20240229-v1:0"  # Updated to latest
         )
         self.region = region or os.getenv("AWS_REGION", "us-east-1")
         

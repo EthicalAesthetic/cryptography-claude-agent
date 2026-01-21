@@ -54,7 +54,7 @@ claude-crypto-agent-poc/
 │   │   └── engine.py            # Policy engine
 │   └── audit/
 │       └── logger.py            # Audit logging
-├── start_start_demo.py                       # Demo script
+├── start_demo.py                       # Demo script
 ├── requirements.txt              # Dependencies
 └── README.md                     # This file
 ```
