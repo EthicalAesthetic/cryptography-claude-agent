@@ -12,6 +12,9 @@ from cryptography.x509.oid import NameOID, ExtensionOID
 
 from src.tools.key_storage import key_storage  # Import shared storage
 
+import os
+from pathlib import Path
+
 logger = logging.getLogger(__name__)
 
 
@@ -233,3 +236,118 @@ class CreateCSRTool:
         except Exception as e:
             logger.error(f"CSR creation failed: {str(e)}")
             raise
+
+
+"""
+Add this to your crypto_tools.py file to enable certificate export
+"""
+
+class ExportCertificateTool:
+    """Tool for exporting generated certificates and keys"""
+    
+    name = "export_certificate"
+    description = "Export the most recently generated certificate and private key to files"
+    
+    def to_bedrock_format(self) -> Dict:
+        """Convert to Bedrock tool format"""
+        return {
+            "toolSpec": {
+                "name": self.name,
+                "description": self.description,
+                "inputSchema": {
+                    "json": {
+                        "type": "object",
+                        "properties": {
+                            "key_id": {
+                                "type": "string",
+                                "description": "Key ID to export (from generate_key_pair)"
+                            },
+                            "certificate_pem": {
+                                "type": "string",
+                                "description": "Certificate in PEM format"
+                            },
+                            "domain": {
+                                "type": "string",
+                                "description": "Domain name for the certificate"
+                            },
+                            "output_path": {
+                                "type": "string",
+                                "description": "Output directory path (optional)",
+                                "default": "./certificates"
+                            }
+                        },
+                        "required": ["key_id", "certificate_pem", "domain"]
+                    }
+                }
+            }
+        }
+    
+    async def execute(
+        self,
+        key_id: str,
+        certificate_pem: str,
+        domain: str,
+        output_path: str = "./certificates"
+    ) -> Dict[str, Any]:
+        """Export certificate and private key to files"""
+        try:
+            from pathlib import Path
+            from datetime import datetime
+            
+            # Create output directory
+            output_dir = Path(output_path)
+            output_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Get private key from storage
+            private_key = key_storage.get_key(key_id)
+            
+            if not private_key:
+                raise ValueError(f"Key not found: {key_id}")
+            
+            # Create filenames
+            timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+            safe_domain = domain.replace(".", "_").replace("*", "wildcard")
+            
+            cert_file = output_dir / f"{safe_domain}_{timestamp}.crt"
+            key_file = output_dir / f"{safe_domain}_{timestamp}.key"
+            
+            # Save certificate
+            with open(cert_file, 'w') as f:
+                f.write(certificate_pem)
+            
+            # Save private key
+            private_key_pem = private_key.private_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PrivateFormat.PKCS8,
+                encryption_algorithm=serialization.NoEncryption()
+            ).decode('utf-8')
+            
+            with open(key_file, 'w') as f:
+                f.write(private_key_pem)
+            
+            # Set secure permissions on private key (Unix only)
+            if hasattr(os, 'chmod'):
+                os.chmod(key_file, 0o600)
+            
+            logger.info(f"Exported certificate to: {cert_file}")
+            logger.info(f"Exported private key to: {key_file}")
+            
+            return {
+                "certificate_path": str(cert_file.absolute()),
+                "key_path": str(key_file.absolute()),
+                "domain": domain,
+                "status": "success",
+                "message": (
+                    f"✅ Certificate and key exported successfully!\n\n"
+                    f"📄 Certificate: {cert_file.absolute()}\n"
+                    f"🔑 Private Key: {key_file.absolute()}\n\n"
+                    f"⚠️ Keep the private key secure! Never share it or commit it to version control."
+                )
+            }
+            
+        except Exception as e:
+            logger.error(f"Certificate export failed: {str(e)}")
+            raise
+
+
+

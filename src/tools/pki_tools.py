@@ -2,6 +2,7 @@
 PKI Tools - Certificate issuance, validation, etc.
 """
 import logging
+import os
 from typing import Dict, Any
 from datetime import datetime, timedelta
 from cryptography import x509
@@ -10,6 +11,9 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import NameOID, ExtensionOID
 
 logger = logging.getLogger(__name__)
+
+# Certificate storage directory
+CERT_DIR = "certificates"
 
 
 class IssueCertificateTool:
@@ -103,7 +107,21 @@ class IssueCertificateTool:
             # Get certificate info
             serial_hex = format(serial, 'X')
             
-            logger.info(f"Issued {certificate_type} certificate: {serial_hex}")
+            # ===== SAVE CERTIFICATE TO FILE =====
+            os.makedirs(CERT_DIR, exist_ok=True)
+            
+            # Extract common name for filename
+            cn = subject.get_attributes_for_oid(NameOID.COMMON_NAME)[0].value
+            safe_cn = cn.replace('*', 'wildcard').replace('/', '_').replace('\\', '_')
+            
+            # Save with both serial and CN in filename
+            cert_filename = f"{CERT_DIR}/{safe_cn}_{serial_hex}.pem"
+            
+            with open(cert_filename, 'w') as f:
+                f.write(cert_pem)
+            
+            logger.info(f"Issued {certificate_type} certificate: {serial_hex} -> {cert_filename}")
+            # ===== END SAVE =====
             
             return {
                 "certificate_pem": cert_pem,
@@ -114,8 +132,9 @@ class IssueCertificateTool:
                 "not_after": not_after.isoformat(),
                 "validity_days": validity_days,
                 "certificate_type": certificate_type,
+                "file_path": cert_filename,  # Added file path to response
                 "status": "success",
-                "message": f"Certificate issued successfully. Valid for {validity_days} days."
+                "message": f"Certificate issued successfully. Valid for {validity_days} days. Saved to {cert_filename}"
             }
             
         except Exception as e:
@@ -257,7 +276,7 @@ class GetCertificateInfoTool:
             # Extract information
             serial = format(cert.serial_number, 'X')
             subject = cert.subject.rfc4514_string()
-            issuer = cert.issuer.subject.rfc4514_string()
+            issuer = cert.issuer.rfc4514_string()
             
             # Get SANs if present
             sans = []
@@ -288,4 +307,72 @@ class GetCertificateInfoTool:
             
         except Exception as e:
             logger.error(f"Failed to parse certificate: {str(e)}")
+            raise
+
+
+class ListCertificatesTool:
+    """Tool for listing all stored certificates"""
+    
+    name = "list_certificates"
+    description = "List all certificates stored in the certificates directory."
+    
+    def to_bedrock_format(self) -> Dict:
+        """Convert to Bedrock tool format"""
+        return {
+            "toolSpec": {
+                "name": self.name,
+                "description": self.description,
+                "inputSchema": {
+                    "json": {
+                        "type": "object",
+                        "properties": {},
+                        "required": []
+                    }
+                }
+            }
+        }
+    
+    async def execute(self) -> Dict[str, Any]:
+        """List all stored certificates"""
+        try:
+            if not os.path.exists(CERT_DIR):
+                return {
+                    "certificates": [],
+                    "count": 0,
+                    "status": "success",
+                    "message": "No certificates directory found."
+                }
+            
+            cert_files = [f for f in os.listdir(CERT_DIR) if f.endswith('.pem')]
+            
+            certificates = []
+            for cert_file in cert_files:
+                cert_path = os.path.join(CERT_DIR, cert_file)
+                with open(cert_path, 'r') as f:
+                    cert_pem = f.read()
+                
+                # Parse certificate to get info
+                cert = x509.load_pem_x509_certificate(cert_pem.encode())
+                cn = cert.subject.get_attributes_for_oid(NameOID.COMMON_NAME)[0].value
+                serial = format(cert.serial_number, 'X')
+                
+                certificates.append({
+                    "filename": cert_file,
+                    "path": cert_path,
+                    "common_name": cn,
+                    "serial_number": serial,
+                    "not_before": cert.not_valid_before.isoformat(),
+                    "not_after": cert.not_valid_after.isoformat(),
+                    "is_expired": datetime.utcnow() > cert.not_valid_after
+                })
+            
+            return {
+                "certificates": certificates,
+                "count": len(certificates),
+                "status": "success",
+                "message": f"Found {len(certificates)} certificate(s)."
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to list certificates: {str(e)}")
             raise

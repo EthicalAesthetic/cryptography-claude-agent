@@ -4,7 +4,7 @@ Tool Registry - Manages all available tools for the agent
 import logging
 from typing import Dict, Any, List
 from src.tools.crypto_tools import GenerateKeyPairTool, CreateCSRTool
-from src.tools.pki_tools import IssueCertificateTool, GetCertificateInfoTool
+from src.tools.pki_tools import IssueCertificateTool, GetCertificateInfoTool, ListCertificatesTool
 from src.tools.policy_tools import ValidatePolicyTool
 
 logger = logging.getLogger(__name__)
@@ -25,8 +25,9 @@ class ToolRegistry:
             GenerateKeyPairTool(),
             CreateCSRTool(),
             IssueCertificateTool(),
-            ValidatePolicyTool(),
-            GetCertificateInfoTool()
+            GetCertificateInfoTool(),
+            ListCertificatesTool(),  # Added new tool
+            ValidatePolicyTool()
         ]
         
         for tool in tools:

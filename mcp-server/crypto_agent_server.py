@@ -1,19 +1,20 @@
 #!/usr/bin/env python3
 """
 MCP Server for Claude Crypto Agent
-Works with Claude Desktop - Fixed notification handling
+Returns actual certificates and keys to the user
 """
 import asyncio
 import json
 import sys
 import os
 from pathlib import Path
+from datetime import datetime
 
 # Add parent directory to path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-# Set up logging to file instead of stdout (MCP uses stdout for protocol)
+# Set up logging
 import logging
 logging.basicConfig(
     filename=str(project_root / 'mcp_server.log'),
@@ -29,16 +30,19 @@ if env_path.exists():
     load_dotenv(env_path)
     logger.info("Loaded .env file")
 
-# Now import agent after path is set
+# Import agent
 from src.agent.orchestrator import create_agent
 
 
 class CryptoAgentMCPServer:
-    """MCP Server for Crypto Agent"""
+    """MCP Server for Crypto Agent with Certificate Output"""
     
     def __init__(self):
         self.agent = None
+        self.output_dir = project_root / "certificates"
+        self.output_dir.mkdir(exist_ok=True)
         logger.info("MCP Server initialized")
+        logger.info(f"Certificates will be saved to: {self.output_dir}")
     
     async def initialize(self):
         """Initialize the crypto agent"""
@@ -49,6 +53,36 @@ class CryptoAgentMCPServer:
         except Exception as e:
             logger.error(f"Failed to create agent: {e}", exc_info=True)
             raise
+    
+    def save_certificate(self, domain: str, cert_pem: str, key_pem: str = None) -> dict:
+        """Save certificate and key to files"""
+        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        safe_domain = domain.replace(".", "_").replace("*", "wildcard")
+        
+        # Save certificate
+        cert_filename = f"{safe_domain}_{timestamp}.crt"
+        cert_path = self.output_dir / cert_filename
+        with open(cert_path, 'w') as f:
+            f.write(cert_pem)
+        
+        # Save private key if provided
+        key_path = None
+        if key_pem:
+            key_filename = f"{safe_domain}_{timestamp}.key"
+            key_path = self.output_dir / key_filename
+            with open(key_path, 'w') as f:
+                f.write(key_pem)
+        
+        logger.info(f"Saved certificate to: {cert_path}")
+        if key_path:
+            logger.info(f"Saved private key to: {key_path}")
+        
+        return {
+            "certificate_path": str(cert_path),
+            "key_path": str(key_path) if key_path else None,
+            "certificate_pem": cert_pem,
+            "key_pem": key_pem
+        }
     
     async def handle_request(self, request: dict):
         """Handle MCP JSON-RPC requests"""
@@ -76,7 +110,6 @@ class CryptoAgentMCPServer:
                 }
             
             elif method == "notifications/initialized":
-                # This is a notification - no response needed
                 logger.info("Client sent initialized notification")
                 return None
             
@@ -88,7 +121,7 @@ class CryptoAgentMCPServer:
                         "tools": [
                             {
                                 "name": "generate_certificate",
-                                "description": "Generate a TLS/SSL certificate for a domain. Handles the complete workflow: key generation, CSR creation, and certificate issuance.",
+                                "description": "Generate a TLS/SSL certificate for a domain. Returns the certificate and private key.",
                                 "inputSchema": {
                                     "type": "object",
                                     "properties": {
@@ -100,6 +133,11 @@ class CryptoAgentMCPServer:
                                             "type": "integer",
                                             "description": "Certificate validity in days (max 397, default 365)",
                                             "default": 365
+                                        },
+                                        "save_to_file": {
+                                            "type": "boolean",
+                                            "description": "Save certificate to file (default: true)",
+                                            "default": True
                                         }
                                     },
                                     "required": ["domain"]
@@ -135,6 +173,7 @@ class CryptoAgentMCPServer:
                 if tool_name == "generate_certificate":
                     domain = tool_args.get("domain")
                     validity_days = tool_args.get("validity_days", 365)
+                    save_to_file = tool_args.get("save_to_file", True)
                     
                     # Create natural language query for agent
                     query = f"Generate a TLS server certificate for {domain} valid for {validity_days} days"
@@ -143,6 +182,34 @@ class CryptoAgentMCPServer:
                     result = await self.agent.process_request(query)
                     
                     if result['status'] == 'success':
+                        # Extract certificate from agent's response
+                        response_text = result['response']
+                        
+                        # Try to parse certificate from response
+                        cert_pem = None
+                        if "-----BEGIN CERTIFICATE-----" in response_text:
+                            start = response_text.index("-----BEGIN CERTIFICATE-----")
+                            end = response_text.index("-----END CERTIFICATE-----") + len("-----END CERTIFICATE-----")
+                            cert_pem = response_text[start:end]
+                        
+                        # Build response
+                        response_message = f"✅ Certificate Generated Successfully!\n\n"
+                        response_message += f"📋 Domain: {domain}\n"
+                        response_message += f"⏰ Validity: {validity_days} days\n"
+                        response_message += f"🔗 Correlation ID: {result['correlation_id']}\n\n"
+                        
+                        if cert_pem and save_to_file:
+                            # Save to file (note: we don't have access to the private key here)
+                            file_info = self.save_certificate(domain, cert_pem)
+                            response_message += f"💾 Certificate saved to:\n"
+                            response_message += f"   {file_info['certificate_path']}\n\n"
+                            response_message += f"📄 Certificate:\n```\n{cert_pem}\n```\n\n"
+                        else:
+                            response_message += f"📄 Full Response:\n{response_text}\n"
+                        
+                        response_message += f"\n⚠️ Note: For security, the private key is stored in the agent's memory.\n"
+                        response_message += f"In production, private keys should be stored in a secure vault (HashiCorp Vault)."
+                        
                         return {
                             "jsonrpc": "2.0",
                             "id": request_id,
@@ -150,7 +217,7 @@ class CryptoAgentMCPServer:
                                 "content": [
                                     {
                                         "type": "text",
-                                        "text": f"✅ Certificate generated successfully!\n\n{result['response']}\n\nCorrelation ID: {result['correlation_id']}"
+                                        "text": response_message
                                     }
                                 ]
                             }
@@ -163,7 +230,8 @@ class CryptoAgentMCPServer:
                                 "content": [
                                     {
                                         "type": "text",
-                                        "text": f"❌ Error generating certificate: {result.get('error', 'Unknown error')}"
+                                        "text": f"❌ Error: {result.get('error', 'Unknown error')}\n\n"
+                                               f"Correlation ID: {result['correlation_id']}"
                                     }
                                 ],
                                 "isError": True
@@ -227,8 +295,8 @@ class CryptoAgentMCPServer:
         try:
             await self.initialize()
             logger.info("MCP Server ready, listening on stdin...")
+            logger.info(f"Certificates directory: {self.output_dir}")
             
-            # Read from stdin line by line
             while True:
                 try:
                     line = sys.stdin.readline()
@@ -245,7 +313,6 @@ class CryptoAgentMCPServer:
                     request = json.loads(line)
                     response = await self.handle_request(request)
                     
-                    # Only write response if not None (notifications don't need responses)
                     if response is not None:
                         response_str = json.dumps(response)
                         print(response_str, flush=True)
