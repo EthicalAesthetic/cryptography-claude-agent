@@ -580,6 +580,3 @@ python start_demo.py
 - "Can I create a 5-year certificate?"
 - "Show me certificate info for my latest cert"
 
----
-
-Built with ❤️ using Claude AI and AWS Bedrock
